@@ -86,7 +86,7 @@ def file_name_check(file_name):
     return None
 
 
-def read_in_chunk(file_name, chunk_size=16 * 1024 * 1024, chunk_number=-1):
+def read_in_chunk(file_name, chunk_size= 16 * 1024 * 1024, chunk_number=-1):
     chunk_counter = 0
     with open(file_name, "rb") as f:
         while True:
@@ -123,7 +123,7 @@ class Args(object):
     args.file:       upload file's name \n
     args.format:     png,jpg; \n
     """
-    def __init__(self,file=None,threads=8,block_size=8,img_format="png",mode="RGB"):
+    def __init__(self,file=None,threads=8,block_size=16,img_format="png",mode="RGB"):
         self.file=file
         self.threads=threads
         self.block_size=block_size*1024*1024
@@ -156,7 +156,7 @@ class DArgs(Args):
 class ImageConverter(object):
 
     def __init__(self,args:Args):
-        self.format = args.img_format
+        self.img_format = args.img_format
         # self.dict = {"PNG": "png", "BMP": "x-ms-bmp","JPEG": "jpg"}  # Todo Bug
         self.mode = args.mode
 
@@ -209,7 +209,7 @@ class ImageConverter(object):
         try:
             image = Image.frombytes(self.mode, (width, height), bytes(pixel_data))
             img_fp = BytesIO()
-            image.save(img_fp, format=self.format)
+            image.save(img_fp, format=self.img_format)
             # full_image_data is header of image plus pixel data (pixel_data)
             full_image_data = img_fp.getvalue()            
         except Exception as e:
@@ -220,14 +220,21 @@ class ImageConverter(object):
     def image_decode(self, data):
         "get raw binary data from image binary data."
         try:
-            image = Image.open(BytesIO(data))
-            pixel_data = image.tobytes()
-            merged_data = pixel_data.rstrip(b"\x00")
-            raw_data = self._image_unpack(merged_data)
+            if self.img_format.lower()== 'png':
+                image = Image.open(BytesIO(data))
+                pixel_data = image.tobytes()
+                merged_data = pixel_data.rstrip(b"\x00")
+                raw_data = self._image_unpack(merged_data)
+            elif self.img_format.lower()=='x-ms-bmp':
+                raw_data=data[62:]
+            else:
+                log(f"尚未支持此图片格式{self.img_format}解码")
+                raw_data= None
             return raw_data
         except Exception as e:
             warn(e)
             return None
+    
 
 
 class CheckDuplicate(object):
@@ -452,7 +459,6 @@ class UploadClass(object):
                 self.block.save(self.args.file, url)
                 return url
             else:
-                # bug
                 self._parse_response(response, 0, i)
                 log(f"元数据第{i + 1}次上传失败")
                 return None
@@ -518,18 +524,30 @@ class DownloadClass(object):
         else:
             log("元数据解析失败")
         return self.meta_dict != None
-
-    def _download_meta(self, link):
+    
+    def __get_format(self,link):
+        "auto select image-format"
         mode_full = re.match(r"^bdrive://[a-fA-F0-9]{40}$", link)
         mode_hash = re.match(r"^[a-fA-F0-9]{40}$", link)
-        if mode_full or mode_hash:
-            url = url_from_sha1(re.findall(r"[a-fA-F0-9]{40}", link)[0], img_format=self.args.img_format)
-            full_meta = self._commit_download(url)
+        full_meta=None
+        if mode_full or mode_hash:   
+            suffix=re.findall(r"[a-fA-F0-9]{40}", link)[0]
+            for mode in ['png', 'jpg', 'x-ms-bmp']:
+                url = url_from_sha1(suffix, img_format=mode)
+                status_code= self._request(url,probe_mode=True)
+                if status_code==200:
+                    self.args.img_format=mode
+                    full_meta=self._commit_download(url)          
         elif link.startswith("http://") or link.startswith("https://"):
             full_meta = self._commit_download(link)
+            self.args.img_format=link.rsplit('.')[-1]
         else:
             log(f"解析链接失败：link:{link}")
-            return None
+        return full_meta 
+
+
+    def _download_meta(self, link):
+        full_meta=self.__get_format(link)
         try:
             return json.loads(full_meta.decode("utf-8"))
         except Exception as e:
@@ -544,6 +562,7 @@ class DownloadClass(object):
         force = self.args.force if not self.args.force else None
         if not os.path.exists(file_name):
             self.block_list = list(range(len(self.meta_dict['block'])))
+            return True
         elif os.path.getsize(file_name) == self.meta_dict['size'] \
                 and calc_sha1(read_in_chunk(file_name), hexdigest=True) == self.meta_dict['sha1']:
             log("文件已存在, 且与服务器端内容一致")
@@ -553,10 +572,10 @@ class DownloadClass(object):
                 for index, block_dict in enumerate(self.meta_dict['block']):
                     f.seek(self._block_offset(index))
                     if not(calc_sha1(f.read(block_dict['size']),
-                            hexdigest=True) == block_dict['sha']):
+                            hexdigest=True) == block_dict['sha1']):
                         self.block_list.append(index)
                 log(f"{len(self.block_list)}/{len(self.meta_dict['block'])}个分块待下载")
-        return True
+                return True
 
     def _block_offset(self, index):
         return sum(self.meta_dict['block'][i]['size'] for i in range(index))
@@ -611,7 +630,7 @@ class DownloadClass(object):
             warn(e)
             return
 
-    def _commit_download(self, url):
+    def _request(self,url,probe_mode=False):
         headers = {
             'Referer': "http://t.bilibili.com/",
             'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.79 Safari/537.36",
@@ -620,18 +639,25 @@ class DownloadClass(object):
         last_chunk_time = None
         try:
             with requests.get(url, headers=headers, timeout=10, stream=True) as req:
+                if  probe_mode:
+                    return req.status_code
                 for chunk in req.iter_content(256*1024):
                     if last_chunk_time and time.time()-last_chunk_time > 5:
                         return None
                     content.append(chunk)
                     last_chunk_time = time.time()
             bdata = b"".join(data for data in content)
-            img = ImageConverter(self.args)
-            raw_data = img.image_decode(bdata)
-            return raw_data
         except Exception as e:
             warn(e)
-            return None
+            bdata=b""
+        return bdata
+
+
+    def _commit_download(self, url):
+            bdata=self._request(url)
+            img = ImageConverter(self.args)           
+            return  img.image_decode(bdata) if bdata else None
+             
 
     def verify_hash(self):
         try:
@@ -661,6 +687,7 @@ if __name__ == "__main__":
     upload=UploadClass(uargs)
     upload.run()
     """
-    dargs=DArgs("bdrive://cf7f63206639ce788276af636b55f3d724ab1f02")
+    link="bdrive://cf7f63206639ce788276af636b55f3d724ab1f02"
+    dargs=DArgs(link)
     download=DownloadClass(dargs)
     download.run()
