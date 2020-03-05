@@ -507,7 +507,7 @@ class DownloadClass(object):
         self.fp = None
 
     def probe_meta(self):
-        "return info meta"
+        "return true if get info meta and file name"
         self.start_time = time.time()
         self.meta_dict = self._download_meta(self.args.link)
 
@@ -517,7 +517,7 @@ class DownloadClass(object):
                 共有{len(self.meta_dict['block'])}个分块, 上传于{time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(self.meta_dict['time']))}")
         else:
             log("元数据解析失败")
-        return self.args.file
+        return self.meta_dict != None
 
     def _download_meta(self, link):
         mode_full = re.match(r"^bdrive://[a-fA-F0-9]{40}$", link)
@@ -547,7 +547,7 @@ class DownloadClass(object):
         elif os.path.getsize(file_name) == self.meta_dict['size'] \
                 and calc_sha1(read_in_chunk(file_name), hexdigest=True) == self.meta_dict['sha1']:
             log("文件已存在, 且与服务器端内容一致")
-            return True
+            return False
         elif CheckDuplicate.is_overwritable(file_name, force):
             with open(file_name, "rb") as f:
                 for index, block_dict in enumerate(self.meta_dict['block']):
@@ -556,12 +556,12 @@ class DownloadClass(object):
                             hexdigest=True) == block_dict['sha']):
                         self.block_list.append(index)
                 log(f"{len(self.block_list)}/{len(self.meta_dict['block'])}个分块待下载")
-        return False
+        return True
 
     def _block_offset(self, index):
         return sum(self.meta_dict['block'][i]['size'] for i in range(index))
 
-    def _file_download(self):
+    def file_download(self):
         file_name = self.args.file
 
         mode = "rb+" if os.path.exists(file_name) else "wb"
@@ -634,7 +634,11 @@ class DownloadClass(object):
             return None
 
     def verify_hash(self):
-        log(f"{os.path.basename(self.args.file)} ({size_string(self.meta_dict['size'])}) 下载完毕, 用时{time.time() - self.start_time:.1f}秒, 平均速度{size_string(self.meta_dict['size'] / (time.time() - self.start_time))}/s")
+        try:
+            log(f"{os.path.basename(self.args.file)} ({size_string(self.meta_dict['size'])}) 下载完毕, 用时{time.time() - self.start_time:.1f}秒, 平均速度{size_string(self.meta_dict['size'] / (time.time() - self.start_time))}/s")
+        except Exception as e:
+            warn(e)
+            return False
         sha1 = calc_sha1(read_in_chunk(self.args.file), hexdigest=True)
         if sha1 == self.meta_dict['sha1']:
             log("文件校验通过")
@@ -644,9 +648,11 @@ class DownloadClass(object):
             return False
 
     def run(self):
-        self.probe_meta()
-        self.resist_check()
-        self._file_download()
+        if self.probe_meta() == False:
+            return
+        if self.resist_check() == False:
+            return
+        self.file_download()
         self.verify_hash()
 
 if __name__ == "__main__":
