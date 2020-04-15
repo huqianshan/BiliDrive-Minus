@@ -4,12 +4,11 @@
 
 <h1 align="center"> BiliDrive-Minus </h1>
 
-<h4 align="center">☁️ 哔哩哔哩云-Minus版，仅供学习与交流，禁止任意文件的上传与下载 ☁️</h4>
+<h4 align="center">☁️ 哔哩哔哩云-Minus版，仅供学习与交流，不支持任意文件的上传与下载 ☁️</h4>
 
 <p align="center">
 <img src="https://img.shields.io/badge/version-2020.3.4-green.svg?longCache=true&style=for-the-badge">
 <img src="https://img.shields.io/badge/license-SATA-blue.svg?longCache=true&style=for-the-badge">
-<img src="https://img.shields.io/travis/com/Hsury/BiliDrive?style=for-the-badge">
 </p>
 
 <p align="center">
@@ -25,7 +24,7 @@
 > - ~~快速：支持多线程传输与断点续传，同时借助B站的CDN资源，能最大化地利用网络环境进行上传与下载~~
 
 - 通过改写`code`,熟悉一下`Python Coding`
-- **此项目并未完全支持上传功能，需要你自己手动修改一行源码**
+- **此项目并不支持上传功能，下载功能且行且珍惜**
 - 向前兼容原`bmp`编码的`bdrive`链接
 - 新增`png`编码格式，理论上`jpg`格式也是可用的，但未测试
 
